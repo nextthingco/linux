@@ -1009,6 +1009,9 @@ write_error:
  * data, which has to be aligned. This function guarantees that in case of an
  * unclean reboot the old contents is preserved. Returns zero in case of
  * success and a negative error code in case of failure.
+ *
+ * UBI reserves one LEB for the "atomic LEB change" operation, so only one
+ * LEB change may be done at a time. This is ensured by @ubi->alc_mutex.
  */
 int ubi_eba_atomic_leb_change(struct ubi_device *ubi, struct ubi_volume *vol,
 			      int lnum, const void *buf, int len)
@@ -1039,6 +1042,7 @@ int ubi_eba_atomic_leb_change(struct ubi_device *ubi, struct ubi_volume *vol,
 	if (!vid_hdr)
 		return -ENOMEM;
 
+	mutex_lock(&ubi->alc_mutex);
 	err = leb_write_lock(ubi, vol_id, lnum);
 	if (err)
 		goto out_mutex;
@@ -1106,6 +1110,7 @@ out_leb_unlock:
 			goto out_leb_unlock;
 	}
 out_mutex:
+	mutex_unlock(&ubi->alc_mutex);
 	ubi_free_vid_hdr(ubi, vid_hdr);
 
 	if (full && !err && ubi_conso_consolidation_needed(ubi))
@@ -1703,6 +1708,7 @@ int ubi_eba_init(struct ubi_device *ubi, struct ubi_attach_info *ai)
 	dbg_eba("initialize EBA sub-system");
 
 	spin_lock_init(&ubi->ltree_lock);
+	mutex_init(&ubi->alc_mutex);
 	ubi->ltree = RB_ROOT;
 
 	ubi->global_sqnum = ai->max_sqnum + 1;
