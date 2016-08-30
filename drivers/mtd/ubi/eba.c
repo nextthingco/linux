@@ -1419,8 +1419,18 @@ int ubi_eba_copy_lebs(struct ubi_device *ubi, int from, int to,
 	spin_lock(&ubi->volumes_lock);
 
 	for (i = 0; i < nvidh; i++) {
-		vol_id[i] = be32_to_cpu(vid_hdr[i].vol_id);
 		lnum[i] = be32_to_cpu(vid_hdr[i].lnum);
+
+		/*
+		 * The LEB may have been invalidated during a previous
+		 * ubi_copy_lebs(). Simply ignore this entry.
+		 */
+		if (lnum[i] < 0) {
+			nlebs--;
+			continue;
+		}
+
+		vol_id[i] = be32_to_cpu(vid_hdr[i].vol_id);
 		vol[i] = ubi->volumes[vol_id2idx(ubi, vol_id[i])];
 	}
 
@@ -1433,6 +1443,13 @@ int ubi_eba_copy_lebs(struct ubi_device *ubi, int from, int to,
 	spin_unlock(&ubi->volumes_lock);
 
 	for (i = 0; i < nvidh; i++) {
+		/*
+		 * The LEB may have been invalidated during a previous
+		 * ubi_copy_lebs(). Simply ignore this entry.
+		 */
+		if (lnum[i] < 0)
+			continue;
+
 		if (!vol[i]) {
 			/* No need to do further work, cancel */
 			ubi_msg(ubi, "volume %d is being removed, cancel", vol_id[i]);
@@ -1460,6 +1477,13 @@ int ubi_eba_copy_lebs(struct ubi_device *ubi, int from, int to,
 	 */
 
 	for (i = 0; i < nvidh; i++) {
+		/*
+		 * The LEB may have been invalidated during a previous
+		 * ubi_copy_lebs(). Simply ignore this entry.
+		 */
+		if (lnum[i] < 0)
+			continue;
+
 		err = ubi_eba_leb_write_trylock(ubi, vol_id[i], lnum[i]);
 		if (err) {
 			int j;
@@ -1475,10 +1499,18 @@ int ubi_eba_copy_lebs(struct ubi_device *ubi, int from, int to,
 	}
 	for (i = 0; i < nvidh; i++) {
 		/*
+		 * The LEB may have been invalidated during a previous
+		 * ubi_copy_lebs(). Simply ignore this entry.
+		 */
+		if (lnum[i] < 0)
+			continue;
+
+		/*
 		 * The LEB might have been put meanwhile, and the task which put it is
 		 * probably waiting on @ubi->move_mutex. No need to continue the work,
 		 * cancel it.
 		 */
+
 		if (vol[i]->eba_tbl[lnum[i]] != from) {
 			ubi_eba_leb_write_unlock(ubi, vol_id[i], lnum[i]);
 			lnum[i] = -1;
@@ -1569,7 +1601,7 @@ int ubi_eba_copy_lebs(struct ubi_device *ubi, int from, int to,
 
 	down_read(&ubi->fm_eba_sem);
 	for (i = 0; i < nvidh; i++) {
-		if (vol_id[i] != -1) {
+		if (lnum[i] >= 0) {
 			ubi_assert(vol[i]->eba_tbl[lnum[i]] == from);
 			vol[i]->eba_tbl[lnum[i]] = to;
 		}
@@ -1584,9 +1616,8 @@ out_unlock_buf:
 	mutex_unlock(&ubi->buf_mutex);
 out_unlock_leb:
 	for (i = 0; i < nvidh; i++) {
-		if (vol_id[i] != -1) {
+		if (lnum[i] >= 0)
 			ubi_eba_leb_write_unlock(ubi, vol_id[i], lnum[i]);
-		}
 	}
 	kfree(vol_id);
 	kfree(lnum);
